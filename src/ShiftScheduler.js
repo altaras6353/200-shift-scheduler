@@ -519,7 +519,7 @@ const ShiftScheduler = () => {
         <textarea
           value={inputData}
           onChange={handleInputChange}
-          placeholder="DDDownload Availabilities to Continue"
+          placeholder="Download Availabilities to Continue"
           className={`w-full h-10 mb-2 p-1 border border-gray-300 ${parseSuccess ? 'bg-green-200' : 'bg-yellow-100'}`}
         />
         <div className="flex justify-between items-center">
