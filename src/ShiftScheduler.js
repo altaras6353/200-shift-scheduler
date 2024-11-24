@@ -11,7 +11,7 @@ const EmployeeCard = ({
     if (assignmentCount === 0) return 'bg-red-200 text-red-800';
     else if (assignmentCount >= 1 && assignmentCount <= 3)
       return 'bg-green-200 text-green-800';
-    else if (assignmentCount === 4) return 'bg-yellow-200 text-yellow-800';
+    else if (assignmentCount >= 4) return 'bg-yellow-200 text-yellow-800';
     else if (assignmentCount >= 5) return 'bg-red-200 text-red-800';
     else return 'bg-gray-200 text-gray-800';
   };
@@ -114,23 +114,13 @@ const AvailabilityEditor = ({ employee, onSave, onClose }) => {
     setPreferredShift({ day, shift });
   }, []);
 
-  const weekdayShifts = [
-    '07:00-12:30',
-    '12:00-17:00',
-    '17:00-21:00',
-    '21:00-01:00',
-    '01:00-07:00',
-  ];
-  const weekendShifts = [
-    '07:00-12:00',
-    '12:00-17:00',
-    '17:00-01:00',
-    '01:00-07:00',
+  const shifts = [
+    '08:00-17:00',
+    '17:00-00:00',
+    '00:00-08:00',
   ];
 
-  const getShiftsForDay = (day) => {
-    return day === 'Friday' || day === 'Saturday' ? weekendShifts : weekdayShifts;
-  };
+  const getShiftsForDay = (day) => shifts;
 
   const days = [
     'Sunday',
@@ -237,12 +227,8 @@ const ShiftScheduler = () => {
     () => ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'],
     []
   );
-  const weekdayShifts = useMemo(
-    () => ['07:00-12:30', '12:00-17:00', '17:00-21:00', '21:00-01:00', '01:00-07:00'],
-    []
-  );
-  const weekendShifts = useMemo(
-    () => ['07:00-12:00', '12:00-17:00', '17:00-01:00', '01:00-07:00'],
+  const shifts = useMemo(
+    () => ['08:00-17:00', '17:00-00:00', '00:00-08:00'],
     []
   );
 
@@ -282,17 +268,13 @@ const ShiftScheduler = () => {
   }, []);
 
   const getShiftsForDay = useCallback(
-    (day) => {
-      return day === 'Friday' || day === 'Saturday' ? weekendShifts : weekdayShifts;
-    },
-    [weekendShifts, weekdayShifts]
+    (day) => shifts,
+    [shifts]
   );
 
   const isShiftAvailable = useCallback((employee, day, shift) => {
     if (!employee || !employee.availabilities) return false;
-    return employee.availabilities[day]?.some((avail) =>
-      shift.startsWith(avail.split('-')[0])
-    );
+    return employee.availabilities[day]?.includes(shift);
   }, []);
 
   const getAssignmentCount = useCallback(() => {
@@ -321,6 +303,13 @@ const ShiftScheduler = () => {
     [employees]
   );
 
+  const validateTimeFormat = (timeStr) => {
+    const [hours, minutes] = timeStr.split(':');
+    const correctedHours = hours.padStart(2, '0');
+    const correctedMinutes = minutes.padStart(2, '0');
+    return `${correctedHours}:${correctedMinutes}`;
+  };
+
   const handleParseInput = useCallback(() => {
     try {
       const lines = inputData.trim().split('\n');
@@ -334,14 +323,21 @@ const ShiftScheduler = () => {
         const availabilities = {};
         hebrewDays.forEach((hebrewDay, index) => {
           const dayRegex = new RegExp(
-            `(\\d{2}:\\d{2}-\\d{2}:\\d{2} ${hebrewDay}[,\\s]*)+`,
+            `(\\d{1,2}:\\d{1,2}-\\d{1,2}:\\d{1,2} ${hebrewDay}[,\\s]*)+`,
             'g'
           );
           const matches = availabilitiesPart.match(dayRegex);
           if (matches) {
-            availabilities[days[index]] = matches[0]
+            const shiftsForDay = matches[0]
               .split(',')
-              .map((shift) => shift.trim().split(' ')[0]);
+              .map((shift) => {
+                const [time, dayName] = shift.trim().split(' ');
+                const [start, end] = time.split('-');
+                const correctedStart = validateTimeFormat(start);
+                const correctedEnd = validateTimeFormat(end);
+                return `${correctedStart}-${correctedEnd}`;
+              });
+            availabilities[days[index]] = shiftsForDay;
           }
         });
 
@@ -409,7 +405,10 @@ const ShiftScheduler = () => {
       return priority[b.role] - priority[a.role];
     });
 
-    const getShiftStartHour = (shift) => parseInt(shift.split(':')[0]);
+    const getShiftStartHour = (shift) => {
+      const hour = parseInt(shift.split(':')[0], 10);
+      return shift.startsWith('00:') ? 24 : hour;
+    };
 
     const isValidAssignment = (emp, day, shift) => {
       if (employeeShiftCounts[emp.name] >= 4) return false;
@@ -422,9 +421,11 @@ const ShiftScheduler = () => {
         const lastShiftTime = Object.entries(lastShifts).find(
           ([s, name]) => name === emp.name
         )[0];
-        const hoursSinceLastShift =
-          (days.indexOf(day) - days.indexOf(lastDay)) * 24 +
-          ((getShiftStartHour(shift) - getShiftStartHour(lastShiftTime) + 24) % 24);
+        const dayDifference = days.indexOf(day) - days.indexOf(lastDay);
+        const hourDifference =
+          getShiftStartHour(shift) - getShiftStartHour(lastShiftTime);
+        const totalHours = dayDifference * 24 + hourDifference;
+        const hoursSinceLastShift = (totalHours + 24) % 24;
         if (hoursSinceLastShift < 12) return false;
       }
       return !Object.values(newAssignments[day] || {}).includes(emp.name);
@@ -586,8 +587,8 @@ const ShiftScheduler = () => {
 
     days.forEach((day, index) => {
       message += `${hebrewDays[index]}:\n`;
-      const shifts = getShiftsForDay(day);
-      shifts.forEach((shift) => {
+      const shiftsForDay = getShiftsForDay(day);
+      shiftsForDay.forEach((shift) => {
         const employee = shiftAssignments[day]?.[shift] || '*ללא איוש*';
         message += `${shift}: ${employee}\n`;
       });
@@ -800,7 +801,7 @@ const ShiftScheduler = () => {
               <thead>
                 <tr>
                   <th className="border border-gray-300 p-2 bg-gray-100">Day</th>
-                  {weekdayShifts.map((shift, index) => (
+                  {shifts.map((shift, index) => (
                     <th key={index} className="border border-gray-300 p-2 bg-gray-100">
                       {shift}
                     </th>
@@ -808,51 +809,10 @@ const ShiftScheduler = () => {
                 </tr>
               </thead>
               <tbody>
-                {days.slice(0, 5).map((day, dayIndex) => (
+                {days.map((day, dayIndex) => (
                   <tr key={day}>
                     <td className="border border-gray-300 p-2 bg-gray-50 font-semibold">
                       {hebrewDays[dayIndex]}
-                    </td>
-                    {getShiftsForDay(day).map((shift, index) => (
-                      <ShiftCell
-                        key={index}
-                        day={day}
-                        shift={shift}
-                        assignedEmployee={shiftAssignments[day]?.[shift]}
-                        onDrop={handleDrop}
-                        onDragStart={handleDragStart}
-                        onDragOver={handleDragOver}
-                        isAvailable={isShiftAvailableForSelected(day, shift)}
-                        onShiftClick={handleShiftClick}
-                        onRemoveClick={handleRemoveClick}
-                        isPreferredShift={isPreferredShift(
-                          shiftAssignments[day]?.[shift],
-                          day,
-                          shift
-                        )}
-                      />
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            <table className="min-w-full">
-              <thead>
-                <tr>
-                  <th className="border border-gray-300 p-2 bg-gray-100">Day</th>
-                  {weekendShifts.map((shift, index) => (
-                    <th key={index} className="border border-gray-300 p-2 bg-gray-100">
-                      {shift}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {days.slice(5).map((day, dayIndex) => (
-                  <tr key={day}>
-                    <td className="border border-gray-300 p-2 bg-gray-50 font-semibold">
-                      {hebrewDays[dayIndex + 5]}
                     </td>
                     {getShiftsForDay(day).map((shift, index) => (
                       <ShiftCell
